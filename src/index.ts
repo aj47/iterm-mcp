@@ -10,6 +10,7 @@ import CommandExecutor from "./CommandExecutor.js";
 import TtyOutputReader from "./TtyOutputReader.js";
 import SendControlCharacter from "./SendControlCharacter.js";
 import SessionManager from "./SessionManager.js";
+import WindowTabManager from "./WindowTabManager.js";
 
 const server = new Server(
   {
@@ -88,6 +89,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["letter"]
         }
+      },
+      {
+        name: "create_window",
+        description: "Creates a new iTerm2 window. Returns the session ID of the new session, which can be used with other tools to interact with it.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            profile: {
+              type: "string",
+              description: "Optional. The name of the iTerm2 profile to use for the new window. If not provided, uses the default profile."
+            }
+          },
+          required: []
+        }
+      },
+      {
+        name: "create_tab",
+        description: "Creates a new tab in an iTerm2 window. Returns the session ID of the new session, which can be used with other tools to interact with it.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            window_id: {
+              type: "integer",
+              description: "Optional. The window ID to create the tab in. Use list_sessions to find window IDs. If not provided, creates the tab in the currently active window."
+            },
+            profile: {
+              type: "string",
+              description: "Optional. The name of the iTerm2 profile to use for the new tab. If not provided, uses the default profile."
+            }
+          },
+          required: []
+        }
       }
     ]
   };
@@ -162,6 +195,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{
           type: "text",
           text: `Sent control character: Control-${letter.toUpperCase()}${sessionInfo}`
+        }]
+      };
+    }
+    case "create_window": {
+      const profile = request.params.arguments?.profile as string | undefined;
+      const result = await WindowTabManager.createWindow(profile);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            message: "Created new window",
+            session_id: result.sessionId,
+            window_id: result.windowId
+          }, null, 2)
+        }]
+      };
+    }
+    case "create_tab": {
+      const windowId = request.params.arguments?.window_id as number | undefined;
+      const profile = request.params.arguments?.profile as string | undefined;
+      const result = await WindowTabManager.createTab(windowId, profile);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            message: "Created new tab",
+            session_id: result.sessionId,
+            window_id: result.windowId,
+            tab_index: result.tabIndex
+          }, null, 2)
         }]
       };
     }
