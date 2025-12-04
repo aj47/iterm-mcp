@@ -104,7 +104,7 @@ export default class SessionManager {
 
     for (const block of sessionBlocks) {
       const parts = block.split(this.FIELD_SEP);
-      if (parts.length >= 9) {
+      if (parts.length >= 10) {
         // Preview is the last field, might contain field separator chars (unlikely with our unique sep)
         const preview = parts.slice(9).join(this.FIELD_SEP);
         const previewLines = preview.split('\n');

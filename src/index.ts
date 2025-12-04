@@ -68,7 +68,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Optional. The unique session ID to read from. Use list_sessions to discover available session IDs. If not provided, reads from the currently active session."
             },
           },
-          required: ["linesOfOutput"]
+          required: []
         }
       },
       {
