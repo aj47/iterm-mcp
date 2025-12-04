@@ -79,6 +79,18 @@ For development with auto-rebuild:
 yarn run watch
 ```
 
+To test locally with Claude Desktop, add this to your MCP config:
+```json
+{
+  "mcpServers": {
+    "iterm-mcp": {
+      "command": "node",
+      "args": ["/path/to/iterm-mcp/build/index.js"]
+    }
+  }
+}
+```
+
 ### Debugging
 
 Since MCP servers communicate over stdio, debugging can be challenging. We recommend using the [MCP Inspector](https://github.com/modelcontextprotocol/inspector), which is available as a package script:
