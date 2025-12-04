@@ -16,7 +16,7 @@ export default class TtyOutputReader {
       return buffer;
     }
     const lines = buffer.split('\n');
-    return lines.slice(-linesOfOutput - 1).join('\n');
+    return lines.slice(-linesOfOutput).join('\n');
   }
 
   /**
