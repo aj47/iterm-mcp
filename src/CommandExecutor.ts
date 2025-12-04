@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { openSync, closeSync } from 'node:fs';
 import ProcessTracker from './ProcessTracker.js';
 import TtyOutputReader from './TtyOutputReader.js';
-import { escapeForAppleScriptString } from './utils/escaping.js';
+import { escapeForAppleScriptString, buildOsascriptCommand } from './utils/escaping.js';
 
 /**
  * CommandExecutor handles sending commands to iTerm2 via AppleScript.
@@ -48,10 +48,12 @@ class CommandExecutor {
       } else if (command.includes('\n')) {
         // For multiline text, we use parentheses around our prepared string expression
         // This allows AppleScript to evaluate the string concatenation expression
-        await this._execPromise(`/usr/bin/osascript -e 'tell application "iTerm2" to tell current session of current window to write text (${escapedCommand})'`);
+        const script = `tell application "iTerm2" to tell current session of current window to write text (${escapedCommand})`;
+        await this._execPromise(buildOsascriptCommand(script));
       } else {
         // For single line commands, we can use the standard approach with quoted strings
-        await this._execPromise(`/usr/bin/osascript -e 'tell application "iTerm2" to tell current session of current window to write text "${escapedCommand}"'`);
+        const script = `tell application "iTerm2" to tell current session of current window to write text "${escapedCommand}"`;
+        await this._execPromise(buildOsascriptCommand(script));
       }
 
       // Wait until iTerm2 reports that command processing is complete
@@ -155,21 +157,21 @@ class CommandExecutor {
       // that properly handles newlines in AppleScript
       return this.prepareMultilineCommand(str);
     }
-    
+
     // First, escape any backslashes
     str = str.replace(/\\/g, '\\\\');
-    
+
     // Escape double quotes
     str = str.replace(/"/g, '\\"');
-    
-    // Handle single quotes by breaking out of the quote, escaping the quote, and going back in
-    str = str.replace(/'/g, "'\\''");
-    
+
+    // Note: Single quotes are NOT escaped here - they are valid in AppleScript double-quoted strings.
+    // Shell escaping is handled separately by buildOsascriptCommand() when executing.
+
     // Handle control characters only - AppleScript handles Unicode characters natively
     str = str.replace(/[\x00-\x1F\x7F]/g, (char) => {
       return '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0');
     });
-    
+
     return str;
   }
   
