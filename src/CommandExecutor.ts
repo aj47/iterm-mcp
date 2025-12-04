@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { openSync, closeSync } from 'node:fs';
 import ProcessTracker from './ProcessTracker.js';
 import TtyOutputReader from './TtyOutputReader.js';
+import { escapeForAppleScriptString } from './utils/escaping.js';
 
 /**
  * CommandExecutor handles sending commands to iTerm2 via AppleScript.
@@ -79,20 +80,21 @@ class CommandExecutor {
    * Writes text to a specific session by its unique ID.
    */
   private async writeToSession(escapedCommand: string, isMultiline: boolean): Promise<void> {
+    const escapedSessionId = escapeForAppleScriptString(this.sessionId!);
     const textExpr = isMultiline ? `(${escapedCommand})` : `"${escapedCommand}"`;
     const script = `
       tell application "iTerm2"
         repeat with w in windows
           repeat with t in tabs of w
             repeat with s in sessions of t
-              if unique id of s is "${this.sessionId}" then
+              if unique id of s is "${escapedSessionId}" then
                 tell s to write text ${textExpr}
                 return
               end if
             end repeat
           end repeat
         end repeat
-        error "Session not found: ${this.sessionId}"
+        error "Session not found: ${escapedSessionId}"
       end tell
     `;
     await this._execPromise(`/usr/bin/osascript -e '${script.replace(/'/g, "'\\''")}'`);
@@ -223,18 +225,19 @@ class CommandExecutor {
     try {
       let script: string;
       if (this.sessionId) {
+        const escapedSessionId = escapeForAppleScriptString(this.sessionId);
         script = `
           tell application "iTerm2"
             repeat with w in windows
               repeat with t in tabs of w
                 repeat with s in sessions of t
-                  if unique id of s is "${this.sessionId}" then
+                  if unique id of s is "${escapedSessionId}" then
                     return tty of s
                   end if
                 end repeat
               end repeat
             end repeat
-            error "Session not found: ${this.sessionId}"
+            error "Session not found: ${escapedSessionId}"
           end tell
         `;
       } else {
@@ -251,18 +254,19 @@ class CommandExecutor {
     try {
       let script: string;
       if (this.sessionId) {
+        const escapedSessionId = escapeForAppleScriptString(this.sessionId);
         script = `
           tell application "iTerm2"
             repeat with w in windows
               repeat with t in tabs of w
                 repeat with s in sessions of t
-                  if unique id of s is "${this.sessionId}" then
+                  if unique id of s is "${escapedSessionId}" then
                     return is processing of s
                   end if
                 end repeat
               end repeat
             end repeat
-            error "Session not found: ${this.sessionId}"
+            error "Session not found: ${escapedSessionId}"
           end tell
         `;
       } else {

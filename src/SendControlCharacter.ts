@@ -1,5 +1,6 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { escapeForAppleScriptString, buildOsascriptCommand } from './utils/escaping.js';
 
 const execPromise = promisify(exec);
 
@@ -43,19 +44,20 @@ class SendControlCharacter {
 
     if (this.sessionId) {
       // Target specific session by unique ID
+      const escapedSessionId = escapeForAppleScriptString(this.sessionId);
       ascript = `
         tell application "iTerm2"
           repeat with w in windows
             repeat with t in tabs of w
               repeat with s in sessions of t
-                if unique id of s is "${this.sessionId}" then
+                if unique id of s is "${escapedSessionId}" then
                   tell s to write text (ASCII character ${controlCode})
                   return
                 end if
               end repeat
             end repeat
           end repeat
-          error "Session not found: ${this.sessionId}"
+          error "Session not found: ${escapedSessionId}"
         end tell
       `;
     } else {
@@ -72,7 +74,7 @@ class SendControlCharacter {
     }
 
     try {
-      await this.executeCommand(`osascript -e '${ascript}'`);
+      await this.executeCommand(buildOsascriptCommand(ascript));
     } catch (error: unknown) {
       throw new Error(`Failed to send control character: ${(error as Error).message}`);
     }

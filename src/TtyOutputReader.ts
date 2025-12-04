@@ -1,5 +1,6 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { escapeForAppleScriptString, buildOsascriptCommand } from './utils/escaping.js';
 
 const execPromise = promisify(exec);
 
@@ -27,18 +28,19 @@ export default class TtyOutputReader {
 
     if (sessionId) {
       // Target specific session by unique ID
+      const escapedSessionId = escapeForAppleScriptString(sessionId);
       ascript = `
         tell application "iTerm2"
           repeat with w in windows
             repeat with t in tabs of w
               repeat with s in sessions of t
-                if unique id of s is "${sessionId}" then
+                if unique id of s is "${escapedSessionId}" then
                   return contents of s
                 end if
               end repeat
             end repeat
           end repeat
-          error "Session not found: ${sessionId}"
+          error "Session not found: ${escapedSessionId}"
         end tell
       `;
     } else {
@@ -55,7 +57,7 @@ export default class TtyOutputReader {
       `;
     }
 
-    const { stdout: finalContent } = await execPromise(`osascript -e '${ascript}'`);
+    const { stdout: finalContent } = await execPromise(buildOsascriptCommand(ascript));
     return finalContent.trim();
   }
 }
