@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { openSync, closeSync } from 'node:fs';
 import ProcessTracker from './ProcessTracker.js';
 import TtyOutputReader from './TtyOutputReader.js';
+import { escapeForAppleScriptString, buildOsascriptCommand } from './utils/escaping.js';
 
 /**
  * CommandExecutor handles sending commands to iTerm2 via AppleScript.
@@ -18,42 +19,48 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 class CommandExecutor {
   private _execPromise: typeof execPromise;
+  private sessionId?: string;
 
-  constructor(execPromiseOverride?: typeof execPromise) {
+  constructor(execPromiseOverride?: typeof execPromise, sessionId?: string) {
     this._execPromise = execPromiseOverride || execPromise;
+    this.sessionId = sessionId;
   }
 
   /**
    * Executes a command in the iTerm2 terminal.
-   * 
+   *
    * This method handles both single-line and multiline commands by:
    * 1. Properly escaping the command string for AppleScript
    * 2. Using different AppleScript approaches based on whether the command contains newlines
    * 3. Waiting for the command to complete execution
    * 4. Retrieving the terminal output after command execution
-   * 
+   *
    * @param command The command to execute (can contain newlines)
    * @returns A promise that resolves to the terminal output after command execution
    */
   async executeCommand(command: string): Promise<string> {
     const escapedCommand = this.escapeForAppleScript(command);
-    
+
     try {
-      // Check if this is a multiline command (which would have been processed differently)
-      if (command.includes('\n')) {
+      if (this.sessionId) {
+        // Target specific session by unique ID
+        await this.writeToSession(escapedCommand, command.includes('\n'));
+      } else if (command.includes('\n')) {
         // For multiline text, we use parentheses around our prepared string expression
         // This allows AppleScript to evaluate the string concatenation expression
-        await this._execPromise(`/usr/bin/osascript -e 'tell application "iTerm2" to tell current session of current window to write text (${escapedCommand})'`);
+        const script = `tell application "iTerm2" to tell current session of current window to write text (${escapedCommand})`;
+        await this._execPromise(buildOsascriptCommand(script));
       } else {
         // For single line commands, we can use the standard approach with quoted strings
-        await this._execPromise(`/usr/bin/osascript -e 'tell application "iTerm2" to tell current session of current window to write text "${escapedCommand}"'`);
+        const script = `tell application "iTerm2" to tell current session of current window to write text "${escapedCommand}"`;
+        await this._execPromise(buildOsascriptCommand(script));
       }
-      
+
       // Wait until iTerm2 reports that command processing is complete
       while (await this.isProcessing()) {
         await sleep(100);
       }
-      
+
       // Get the TTY path and check if it's waiting for user input
       const ttyPath = await this.retrieveTtyPath();
       while (await this.isWaitingForUserInput(ttyPath) === false) {
@@ -62,13 +69,37 @@ class CommandExecutor {
 
       // Give a small delay for output to settle
       await sleep(200);
-      
+
       // Retrieve the terminal output after command execution
-      const afterCommandBuffer = await TtyOutputReader.retrieveBuffer()
+      const afterCommandBuffer = await TtyOutputReader.retrieveBuffer(this.sessionId)
       return afterCommandBuffer
     } catch (error: unknown) {
       throw new Error(`Failed to execute command: ${(error as Error).message}`);
     }
+  }
+
+  /**
+   * Writes text to a specific session by its unique ID.
+   */
+  private async writeToSession(escapedCommand: string, isMultiline: boolean): Promise<void> {
+    const escapedSessionId = escapeForAppleScriptString(this.sessionId!);
+    const textExpr = isMultiline ? `(${escapedCommand})` : `"${escapedCommand}"`;
+    const script = `
+      tell application "iTerm2"
+        repeat with w in windows
+          repeat with t in tabs of w
+            repeat with s in sessions of t
+              if unique id of s is "${escapedSessionId}" then
+                tell s to write text ${textExpr}
+                return
+              end if
+            end repeat
+          end repeat
+        end repeat
+        error "Session not found: ${escapedSessionId}"
+      end tell
+    `;
+    await this._execPromise(`/usr/bin/osascript -e '${script.replace(/'/g, "'\\''")}'`);
   }
 
   async isWaitingForUserInput(ttyPath: string): Promise<boolean> {
@@ -126,21 +157,21 @@ class CommandExecutor {
       // that properly handles newlines in AppleScript
       return this.prepareMultilineCommand(str);
     }
-    
+
     // First, escape any backslashes
     str = str.replace(/\\/g, '\\\\');
-    
+
     // Escape double quotes
     str = str.replace(/"/g, '\\"');
-    
-    // Handle single quotes by breaking out of the quote, escaping the quote, and going back in
-    str = str.replace(/'/g, "'\\''");
-    
+
+    // Note: Single quotes are NOT escaped here - they are valid in AppleScript double-quoted strings.
+    // Shell escaping is handled separately by buildOsascriptCommand() when executing.
+
     // Handle control characters only - AppleScript handles Unicode characters natively
     str = str.replace(/[\x00-\x1F\x7F]/g, (char) => {
       return '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0');
     });
-    
+
     return str;
   }
   
@@ -194,7 +225,27 @@ class CommandExecutor {
 
   private async retrieveTtyPath(): Promise<string> {
     try {
-      const { stdout } = await this._execPromise(`/usr/bin/osascript -e 'tell application "iTerm2" to tell current session of current window to get tty'`);
+      let script: string;
+      if (this.sessionId) {
+        const escapedSessionId = escapeForAppleScriptString(this.sessionId);
+        script = `
+          tell application "iTerm2"
+            repeat with w in windows
+              repeat with t in tabs of w
+                repeat with s in sessions of t
+                  if unique id of s is "${escapedSessionId}" then
+                    return tty of s
+                  end if
+                end repeat
+              end repeat
+            end repeat
+            error "Session not found: ${escapedSessionId}"
+          end tell
+        `;
+      } else {
+        script = `tell application "iTerm2" to tell current session of current window to get tty`;
+      }
+      const { stdout } = await this._execPromise(`/usr/bin/osascript -e '${script.replace(/'/g, "'\\''")}'`);
       return stdout.trim();
     } catch (error: unknown) {
       throw new Error(`Failed to retrieve TTY path: ${(error as Error).message}`);
@@ -203,7 +254,27 @@ class CommandExecutor {
 
   private async isProcessing(): Promise<boolean> {
     try {
-      const { stdout } = await this._execPromise(`/usr/bin/osascript -e 'tell application "iTerm2" to tell current session of current window to get is processing'`);
+      let script: string;
+      if (this.sessionId) {
+        const escapedSessionId = escapeForAppleScriptString(this.sessionId);
+        script = `
+          tell application "iTerm2"
+            repeat with w in windows
+              repeat with t in tabs of w
+                repeat with s in sessions of t
+                  if unique id of s is "${escapedSessionId}" then
+                    return is processing of s
+                  end if
+                end repeat
+              end repeat
+            end repeat
+            error "Session not found: ${escapedSessionId}"
+          end tell
+        `;
+      } else {
+        script = `tell application "iTerm2" to tell current session of current window to get is processing`;
+      }
+      const { stdout } = await this._execPromise(`/usr/bin/osascript -e '${script.replace(/'/g, "'\\''")}'`);
       return stdout.trim() === 'true';
     } catch (error: unknown) {
       throw new Error(`Failed to check processing status: ${(error as Error).message}`);
