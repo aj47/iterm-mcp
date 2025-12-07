@@ -17,13 +17,32 @@ import { escapeForAppleScriptString, buildOsascriptCommand } from './utils/escap
 const execPromise = promisify(exec);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Default timeout values (in milliseconds)
+const DEFAULT_COMMAND_TIMEOUT_MS = 30000; // 30 seconds max for entire command execution
+const DEFAULT_PROCESSING_TIMEOUT_MS = 15000; // 15 seconds max waiting for isProcessing
+const DEFAULT_USER_INPUT_TIMEOUT_MS = 15000; // 15 seconds max waiting for user input detection
+
 class CommandExecutor {
   private _execPromise: typeof execPromise;
   private sessionId?: string;
+  private commandTimeoutMs: number;
+  private processingTimeoutMs: number;
+  private userInputTimeoutMs: number;
 
-  constructor(execPromiseOverride?: typeof execPromise, sessionId?: string) {
+  constructor(
+    execPromiseOverride?: typeof execPromise,
+    sessionId?: string,
+    options?: {
+      commandTimeoutMs?: number;
+      processingTimeoutMs?: number;
+      userInputTimeoutMs?: number;
+    }
+  ) {
     this._execPromise = execPromiseOverride || execPromise;
     this.sessionId = sessionId;
+    this.commandTimeoutMs = options?.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+    this.processingTimeoutMs = options?.processingTimeoutMs ?? DEFAULT_PROCESSING_TIMEOUT_MS;
+    this.userInputTimeoutMs = options?.userInputTimeoutMs ?? DEFAULT_USER_INPUT_TIMEOUT_MS;
   }
 
   /**
@@ -42,6 +61,8 @@ class CommandExecutor {
     const escapedCommand = this.escapeForAppleScript(command);
 
     try {
+      const commandStartTime = Date.now();
+
       if (this.sessionId) {
         // Target specific session by unique ID
         await this.writeToSession(escapedCommand, command.includes('\n'));
@@ -56,14 +77,32 @@ class CommandExecutor {
         await this._execPromise(buildOsascriptCommand(script));
       }
 
-      // Wait until iTerm2 reports that command processing is complete
+      // Wait until iTerm2 reports that command processing is complete (with timeout)
+      const processingStartTime = Date.now();
       while (await this.isProcessing()) {
+        if (Date.now() - processingStartTime > this.processingTimeoutMs) {
+          // Timeout reached, continue anyway - command may still be running
+          break;
+        }
+        if (Date.now() - commandStartTime > this.commandTimeoutMs) {
+          // Overall command timeout reached
+          break;
+        }
         await sleep(100);
       }
 
-      // Get the TTY path and check if it's waiting for user input
+      // Get the TTY path and check if it's waiting for user input (with timeout)
       const ttyPath = await this.retrieveTtyPath();
+      const userInputStartTime = Date.now();
       while (await this.isWaitingForUserInput(ttyPath) === false) {
+        if (Date.now() - userInputStartTime > this.userInputTimeoutMs) {
+          // Timeout reached waiting for user input, continue anyway
+          break;
+        }
+        if (Date.now() - commandStartTime > this.commandTimeoutMs) {
+          // Overall command timeout reached
+          break;
+        }
         await sleep(100);
       }
 
@@ -109,11 +148,20 @@ class CommandExecutor {
       fd = openSync(ttyPath, 'r');
       const tracker = new ProcessTracker();
       let belowThresholdTime = 0;
-      
+      const startTime = Date.now();
+      // Internal timeout for this method (5 seconds max for the inner loop)
+      const maxWaitTime = 5000;
+
       while (true) {
+        // Check for timeout to prevent infinite loop
+        if (Date.now() - startTime > maxWaitTime) {
+          // Timeout reached, assume we're ready (process may still be running)
+          return true;
+        }
+
         try {
           const activeProcess = await tracker.getActiveProcess(ttyPath);
-          
+
           if (!activeProcess) return true;
 
           if (activeProcess.metrics.totalCPUPercent < 1) {
@@ -135,7 +183,6 @@ class CommandExecutor {
       if (fd !== undefined) {
         closeSync(fd);
       }
-      return true;
     }
   }
 
