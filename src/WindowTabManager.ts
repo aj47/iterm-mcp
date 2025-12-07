@@ -20,8 +20,8 @@ export default class WindowTabManager {
    * @returns Information about the newly created session
    */
   static async createWindow(profile?: string): Promise<CreateResult> {
-    const profileClause = profile ? `with profile "${profile}"` : '';
-    
+    const profileClause = profile ? `with profile "${profile}"` : 'with default profile';
+
     const script = `
       tell application "iTerm2"
         set newWindow to (create window ${profileClause})
@@ -52,7 +52,7 @@ export default class WindowTabManager {
    * @returns Information about the newly created session
    */
   static async createTab(windowId?: number, profile?: string): Promise<CreateResult> {
-    const profileClause = profile ? `with profile "${profile}"` : '';
+    const profileClause = profile ? `with profile "${profile}"` : 'with default profile';
     
     let script: string;
     
