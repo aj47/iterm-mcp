@@ -29,7 +29,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: "list_sessions",
-        description: "Lists all iTerm terminal sessions across all windows and tabs. Returns session IDs that can be used to target specific sessions with other tools. Use this to discover existing sessions and see what they are doing.",
+        description: "Lists all iTerm terminal sessions across all windows and tabs. Returns session IDs that can be used to target specific sessions with other tools. Each session includes: session_id, name, window, tab_index, tty, profile, is_current, is_processing, and the last 5 lines of output as 'preview'. IMPORTANT: Always call this first before write_to_terminal to get a valid session_id.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -38,7 +38,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "write_to_terminal",
-        description: "Writes text to an iTerm terminal session - often used to run a command. If session_id is provided, writes to that specific session; otherwise writes to the currently active session.",
+        description: "Writes text to an iTerm terminal session - often used to run a command. IMPORTANT: You must first call list_sessions to get a valid session_id before using this tool.",
         inputSchema: {
           type: "object",
           properties: {
@@ -48,10 +48,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             session_id: {
               type: "string",
-              description: "Optional. The unique session ID to write to. Use list_sessions to discover available session IDs. If not provided, writes to the currently active session."
+              description: "Required. The unique session ID to write to. Use list_sessions to discover available session IDs."
             },
           },
-          required: ["command"]
+          required: ["command", "session_id"]
         }
       },
       {
@@ -153,6 +153,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     case "write_to_terminal": {
       const sessionId = request.params.arguments?.session_id as string | undefined;
+      if (!sessionId) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: session_id is required. Please call list_sessions first to get available session IDs."
+          }],
+          isError: true
+        };
+      }
       const executor = new CommandExecutor(undefined, sessionId);
       const command = String(request.params.arguments?.command);
       const beforeCommandBuffer = await TtyOutputReader.retrieveBuffer(sessionId);
@@ -164,11 +173,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const afterCommandBufferLines = afterCommandBuffer.split("\n").length;
       const outputLines = afterCommandBufferLines - beforeCommandBufferLines;
 
-      const sessionInfo = sessionId ? ` (session: ${sessionId})` : "";
       return {
         content: [{
           type: "text",
-          text: `${outputLines} lines were output after sending the command to the terminal${sessionInfo}. Read the last ${outputLines} lines of terminal contents to orient yourself. Never assume that the command was executed or that it was successful.`
+          text: `${outputLines} lines were output after sending the command to the terminal (session: ${sessionId}). Read the last ${outputLines} lines of terminal contents to orient yourself. Never assume that the command was executed or that it was successful.`
         }]
       };
     }
