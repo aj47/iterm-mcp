@@ -4,6 +4,33 @@ import { escapeForAppleScriptString, buildOsascriptCommand } from './utils/escap
 
 const execPromise = promisify(exec);
 
+// Map of special key names to their ASCII codes
+const SPECIAL_KEYS: Record<string, number> = {
+  // Enter/Return keys
+  'ENTER': 13,      // Carriage Return
+  'RETURN': 13,     // Carriage Return
+  'CR': 13,         // Carriage Return
+  'LF': 10,         // Line Feed
+  'NEWLINE': 10,    // Line Feed
+
+  // Escape key
+  'ESCAPE': 27,
+  'ESC': 27,
+
+  // Tab key
+  'TAB': 9,
+
+  // Backspace/Delete
+  'BACKSPACE': 127, // DEL character (what backspace typically sends)
+  'BS': 8,          // ASCII backspace
+  'DELETE': 127,    // DEL
+  'DEL': 127,
+
+  // Other control characters
+  ']': 29,          // GS - Group Separator (telnet escape)
+  'SPACE': 32,      // Space (useful for sending space without implicit newline)
+};
+
 class SendControlCharacter {
   private sessionId?: string;
 
@@ -18,26 +45,24 @@ class SendControlCharacter {
 
   async send(letter: string): Promise<void> {
     let controlCode: number;
+    const upperLetter = letter.toUpperCase();
 
-    // Handle special cases for telnet escape sequences
-    if (letter.toUpperCase() === ']') {
-      // ASCII 29 (GS - Group Separator) - the telnet escape character
-      controlCode = 29;
+    // Check if it's a special key name first
+    if (upperLetter in SPECIAL_KEYS) {
+      controlCode = SPECIAL_KEYS[upperLetter];
     }
-    // Add other special cases here as needed
-    else if (letter.toUpperCase() === 'ESCAPE' || letter.toUpperCase() === 'ESC') {
-      // ASCII 27 (ESC - Escape)
-      controlCode = 27;
+    // Check for the literal ']' character (telnet escape)
+    else if (letter === ']') {
+      controlCode = SPECIAL_KEYS[']'];
     }
+    // Standard control characters (A-Z become Ctrl+A through Ctrl+Z)
     else {
-      // Validate input for standard control characters
-      letter = letter.toUpperCase();
-      if (!/^[A-Z]$/.test(letter)) {
-        throw new Error('Invalid control character letter');
+      const normalizedLetter = upperLetter;
+      if (!/^[A-Z]$/.test(normalizedLetter)) {
+        throw new Error(`Invalid key: "${letter}". Use a single letter (A-Z) for control characters, or a special key name (ENTER, ESC, TAB, BACKSPACE, etc.)`);
       }
-
       // Convert to standard control code (A=1, B=2, etc.)
-      controlCode = letter.charCodeAt(0) - 64;
+      controlCode = normalizedLetter.charCodeAt(0) - 64;
     }
 
     let ascript: string;
@@ -45,13 +70,14 @@ class SendControlCharacter {
     if (this.sessionId) {
       // Target specific session by unique ID
       const escapedSessionId = escapeForAppleScriptString(this.sessionId);
+      // Use "newline NO" to prevent iTerm2 from adding an extra newline after the character
       ascript = `
         tell application "iTerm2"
           repeat with w in windows
             repeat with t in tabs of w
               repeat with s in sessions of t
                 if unique id of s is "${escapedSessionId}" then
-                  tell s to write text (ASCII character ${controlCode})
+                  tell s to write text (ASCII character ${controlCode}) newline NO
                   return
                 end if
               end repeat
@@ -62,11 +88,12 @@ class SendControlCharacter {
       `;
     } else {
       // Default: current session of front window
+      // Use "newline NO" to prevent iTerm2 from adding an extra newline after the character
       ascript = `
         tell application "iTerm2"
           tell front window
             tell current session of current tab
-              write text (ASCII character ${controlCode})
+              write text (ASCII character ${controlCode}) newline NO
             end tell
           end tell
         end tell
@@ -76,7 +103,7 @@ class SendControlCharacter {
     try {
       await this.executeCommand(buildOsascriptCommand(ascript));
     } catch (error: unknown) {
-      throw new Error(`Failed to send control character: ${(error as Error).message}`);
+      throw new Error(`Failed to send key: ${(error as Error).message}`);
     }
   }
 }

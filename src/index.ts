@@ -74,13 +74,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "send_control_character",
-        description: "Sends a control character to an iTerm terminal session (e.g., Control-C, or special sequences like ']' for telnet escape). If session_id is provided, sends to that specific session; otherwise sends to the currently active session.",
+        description: "Sends a control character or special key to an iTerm terminal session. Supports: Control characters (A-Z for Ctrl+A through Ctrl+Z), ENTER/RETURN (carriage return), ESC/ESCAPE, TAB, BACKSPACE/DELETE, and special sequences like ']' for telnet escape. If session_id is provided, sends to that specific session; otherwise sends to the currently active session.",
         inputSchema: {
           type: "object",
           properties: {
             letter: {
               type: "string",
-              description: "The letter corresponding to the control character (e.g., 'C' for Control-C, ']' for telnet escape)"
+              description: "The key to send. Options: single letter (A-Z) for control characters (e.g., 'C' for Ctrl+C), or special key names: ENTER, RETURN, ESC, ESCAPE, TAB, BACKSPACE, DELETE, SPACE, or ']' for telnet escape"
             },
             session_id: {
               type: "string",
@@ -199,10 +199,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       await ttyControl.send(letter);
 
       const sessionInfo = sessionId ? ` (session: ${sessionId})` : "";
+      const upperLetter = letter.toUpperCase();
+      // Determine if it's a special key or a control character for the message
+      const specialKeys = ['ENTER', 'RETURN', 'ESC', 'ESCAPE', 'TAB', 'BACKSPACE', 'DELETE', 'SPACE', 'CR', 'LF', 'NEWLINE', 'BS', 'DEL'];
+      const keyDescription = specialKeys.includes(upperLetter) || letter === ']'
+        ? upperLetter
+        : `Control-${upperLetter}`;
       return {
         content: [{
           type: "text",
-          text: `Sent control character: Control-${letter.toUpperCase()}${sessionInfo}`
+          text: `Sent key: ${keyDescription}${sessionInfo}`
         }]
       };
     }

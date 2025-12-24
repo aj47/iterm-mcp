@@ -54,35 +54,89 @@ describe('SendControlCharacter', () => {
   test('should handle escape key', async () => {
     // Act
     await sendControlCharacter.send('ESC');
-    
+
     // Assert - Escape is ASCII 27
     expect(sendControlCharacter.mockExecuteCommand).toHaveBeenCalledWith(
       expect.stringContaining('ASCII character 27')
     );
-    
+
     // Test with alternative format
     await sendControlCharacter.send('escape');
     expect(sendControlCharacter.mockExecuteCommand).toHaveBeenCalledWith(
       expect.stringContaining('ASCII character 27')
     );
   });
-  
+
+  test('should handle enter/return key', async () => {
+    // Act
+    await sendControlCharacter.send('ENTER');
+
+    // Assert - Carriage Return is ASCII 13
+    expect(sendControlCharacter.mockExecuteCommand).toHaveBeenCalledWith(
+      expect.stringContaining('ASCII character 13')
+    );
+
+    // Test with alternative format
+    sendControlCharacter.mockExecuteCommand.mockClear();
+    await sendControlCharacter.send('return');
+    expect(sendControlCharacter.mockExecuteCommand).toHaveBeenCalledWith(
+      expect.stringContaining('ASCII character 13')
+    );
+  });
+
+  test('should handle tab key', async () => {
+    // Act
+    await sendControlCharacter.send('TAB');
+
+    // Assert - Tab is ASCII 9
+    expect(sendControlCharacter.mockExecuteCommand).toHaveBeenCalledWith(
+      expect.stringContaining('ASCII character 9')
+    );
+  });
+
+  test('should handle backspace/delete key', async () => {
+    // Act
+    await sendControlCharacter.send('BACKSPACE');
+
+    // Assert - DEL is ASCII 127
+    expect(sendControlCharacter.mockExecuteCommand).toHaveBeenCalledWith(
+      expect.stringContaining('ASCII character 127')
+    );
+
+    // Test with alternative format
+    sendControlCharacter.mockExecuteCommand.mockClear();
+    await sendControlCharacter.send('delete');
+    expect(sendControlCharacter.mockExecuteCommand).toHaveBeenCalledWith(
+      expect.stringContaining('ASCII character 127')
+    );
+  });
+
+  test('should use newline NO to prevent extra newlines', async () => {
+    // Act
+    await sendControlCharacter.send('ENTER');
+
+    // Assert - Command should include "newline NO" to prevent iTerm2 from adding extra newline
+    expect(sendControlCharacter.mockExecuteCommand).toHaveBeenCalledWith(
+      expect.stringContaining('newline NO')
+    );
+  });
+
   test('should throw an error for invalid control characters', async () => {
     // Act & Assert
     await expect(sendControlCharacter.send('123')).rejects.toThrow(
-      'Invalid control character letter'
+      'Invalid key'
     );
   });
-  
+
   test('should throw an error when execution fails', async () => {
     // Arrange - Make the mock throw an error
     sendControlCharacter.mockExecuteCommand.mockImplementation(() => {
       throw new Error('Command execution failed');
     });
-    
+
     // Act & Assert
     await expect(sendControlCharacter.send('C')).rejects.toThrow(
-      'Failed to send control character: Command execution failed'
+      'Failed to send key: Command execution failed'
     );
   });
 });
